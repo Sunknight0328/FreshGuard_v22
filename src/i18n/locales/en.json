@@ -128,7 +128,12 @@
     "consumedSuccess": "Marked as consumed",
     "consumedFailed": "Failed to mark as consumed",
     "quantityUpdateSuccess": "Quantity updated",
-    "quantityUpdateFailed": "Failed to update quantity"
+    "quantityUpdateFailed": "Failed to update quantity",
+    "duplicateFound": "Duplicate Item Found",
+    "duplicateMessage": "You already have \"{name}\" in your fridge with {quantity} {unit}. Would you like to increase the quantity instead of adding a new item?",
+    "increaseQuantity": "Increase Quantity",
+    "addAsNew": "Add as New Item",
+    "quantityIncreased": "Quantity increased successfully"
   },
   "addFood": {
     "title": "Add Food",
@@ -181,7 +186,8 @@
     "recommendingShelfLifeText": "Recommending shelf life...",
     "recommendedShelfLifeLabel": "Recommended Shelf Life",
     "expiryDateLabel": "Expiry Date",
-    "daysUnit": "days"
+    "daysUnit": "days",
+    "willAdd": "Will add"
   },
   "reminders": {
     "title": "Reminder Center",

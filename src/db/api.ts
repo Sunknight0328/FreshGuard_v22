@@ -234,6 +234,59 @@ export async function markFoodAsConsumed(id: string): Promise<boolean> {
 }
 
 /**
+ * 检查是否存在同名食材
+ */
+export async function checkDuplicateFoodItem(name: string): Promise<FoodItem | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("food_items")
+    .select("*")
+    .eq("user_id", user.id)
+    .ilike("name", name)
+    .maybeSingle();
+
+  if (error) {
+    console.error("检查重复食材失败:", error);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * 增加食材数量
+ */
+export async function increaseFoodQuantity(id: string, additionalQuantity: number): Promise<boolean> {
+  // 先获取当前数量
+  const { data: item, error: fetchError } = await supabase
+    .from("food_items")
+    .select("quantity")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchError || !item) {
+    console.error("获取食材数量失败:", fetchError);
+    return false;
+  }
+
+  const newQuantity = item.quantity + additionalQuantity;
+
+  const { error } = await supabase
+    .from("food_items")
+    .update({ quantity: newQuantity })
+    .eq("id", id);
+
+  if (error) {
+    console.error("增加食材数量失败:", error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * 搜索食材
  */
 export async function searchFoodItems(keyword: string): Promise<FoodItem[]> {

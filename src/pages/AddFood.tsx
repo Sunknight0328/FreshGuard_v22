@@ -2,12 +2,12 @@ import { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '@/i18n';
 import { useNavigate } from 'react-router-dom';
-import { addFoodItem, uploadFoodImage } from '@/db/api';
+import { addFoodItem, uploadFoodImage, checkDuplicateFoodItem, increaseFoodQuantity } from '@/db/api';
 import api from '@/utils/api';
 import { calculateExpiryDate, getDefaultShelfLife } from '@/utils/shelfLifeHelper';
 import { recommendStorageMethod, getStorageMethodIcon } from '@/utils/storageMethodHelper';
 import { classifyFood } from '@/utils/categoryHelper';
-import type { FoodItemFormData, StorageMethod } from '@/types/types';
+import type { FoodItemFormData, StorageMethod, FoodItem } from '@/types/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { Camera, Upload, Loader2, ArrowLeft, Sparkles } from 'lucide-react';
 
@@ -42,6 +52,11 @@ export default function AddFood() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  
+  // 查重相关状态
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [duplicateItem, setDuplicateItem] = useState<FoodItem | null>(null);
+  const [pendingFormData, setPendingFormData] = useState<FoodItemFormData | null>(null);
   
   // 扫描小票相关状态
   const [scannedItems, setScannedItems] = useState<Array<{
@@ -506,11 +521,25 @@ export default function AddFood() {
       return;
     }
 
+    // 查重：检查是否已存在同名食材
+    const duplicate = await checkDuplicateFoodItem(formData.name.trim());
+    if (duplicate) {
+      setDuplicateItem(duplicate);
+      setPendingFormData(formData);
+      setDuplicateDialogOpen(true);
+      return;
+    }
+
+    // 没有重复，直接添加
+    await performAddFood(formData);
+  };
+
+  const performAddFood = async (data: FoodItemFormData) => {
     setLoading(true);
 
     try {
-      let imageUrl = formData.image_url;
-      let finalExpiryDate = formData.expiry_date;
+      let imageUrl = data.image_url;
+      let finalExpiryDate = data.expiry_date;
 
       // 如果有图片文件，先上传
       if (imageFile) {
@@ -532,16 +561,16 @@ export default function AddFood() {
 
         try {
           // 步骤1: 智能分类
-          const category = formData.category || classifyFood(formData.name);
+          const category = data.category || classifyFood(data.name);
           
           // 步骤2: 根据分类推荐存储方式（如果用户没有选择）
-          const storageMethod = formData.storage_method;
+          const storageMethod = data.storage_method;
           
           // 步骤3: 根据分类和存储方式推荐保质期
           const shelfLifeDays = getDefaultShelfLife(category, storageMethod);
           
           // 步骤4: 计算到期日期
-          finalExpiryDate = calculateExpiryDate(formData.purchase_date, shelfLifeDays);
+          finalExpiryDate = calculateExpiryDate(data.purchase_date, shelfLifeDays);
           
           toast({
             title: t('addFood.smartRecommendSuccess'),
@@ -554,7 +583,7 @@ export default function AddFood() {
         } catch (error) {
           console.error('智能推荐保质期失败:', error);
           // 推荐失败，使用默认7天
-          finalExpiryDate = calculateExpiryDate(formData.purchase_date, 7);
+          finalExpiryDate = calculateExpiryDate(data.purchase_date, 7);
           toast({
             title: t('addFood.useDefaultShelfLife'),
             description: t('addFood.autoRecommendFailed'),
@@ -563,7 +592,7 @@ export default function AddFood() {
       }
 
       const result = await addFoodItem({
-        ...formData,
+        ...data,
         expiry_date: finalExpiryDate,
         image_url: imageUrl,
       });
@@ -586,6 +615,42 @@ export default function AddFood() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleIncreaseQuantity = async () => {
+    if (!duplicateItem || !pendingFormData) return;
+
+    setLoading(true);
+    try {
+      const success = await increaseFoodQuantity(duplicateItem.id, pendingFormData.quantity);
+      if (success) {
+        toast({
+          title: t('foodItem.quantityIncreased'),
+        });
+        navigate('/');
+      } else {
+        throw new Error(t('foodItem.quantityUpdateFailed'));
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: t('foodItem.quantityUpdateFailed'),
+      });
+    } finally {
+      setLoading(false);
+      setDuplicateDialogOpen(false);
+      setDuplicateItem(null);
+      setPendingFormData(null);
+    }
+  };
+
+  const handleAddAsNew = async () => {
+    if (!pendingFormData) return;
+    
+    setDuplicateDialogOpen(false);
+    await performAddFood(pendingFormData);
+    setDuplicateItem(null);
+    setPendingFormData(null);
   };
 
   return (
@@ -1016,6 +1081,50 @@ export default function AddFood() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* 查重确认对话框 */}
+      <AlertDialog open={duplicateDialogOpen} onOpenChange={setDuplicateDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('foodItem.duplicateFound')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicateItem && pendingFormData && (
+                <>
+                  {t('foodItem.duplicateMessage', {
+                    name: duplicateItem.name,
+                    quantity: duplicateItem.quantity,
+                    unit: t(`units.${duplicateItem.unit}`, duplicateItem.unit)
+                  })}
+                  <br /><br />
+                  <strong>{t('foodItem.expiryDate')}:</strong> {duplicateItem.expiry_date}
+                  <br />
+                  <strong>{t('addFood.willAdd')}:</strong> {pendingFormData.quantity} {t(`units.${pendingFormData.unit}`, pendingFormData.unit)}
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setDuplicateDialogOpen(false);
+              setDuplicateItem(null);
+              setPendingFormData(null);
+            }}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <Button
+              onClick={handleAddAsNew}
+              variant="outline"
+            >
+              {t('foodItem.addAsNew')}
+            </Button>
+            <AlertDialogAction
+              onClick={handleIncreaseQuantity}
+            >
+              {t('foodItem.increaseQuantity')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

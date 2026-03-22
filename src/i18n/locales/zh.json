@@ -128,7 +128,12 @@
     "consumedSuccess": "已标记为已食用",
     "consumedFailed": "标记失败",
     "quantityUpdateSuccess": "数量已更新",
-    "quantityUpdateFailed": "数量更新失败"
+    "quantityUpdateFailed": "数量更新失败",
+    "duplicateFound": "发现重复食材",
+    "duplicateMessage": "您的冰箱中已有\"{name}\"，数量为 {quantity} {unit}。是否增加数量而不是添加新记录？",
+    "increaseQuantity": "增加数量",
+    "addAsNew": "仍然添加为新记录",
+    "quantityIncreased": "数量已增加"
   },
   "addFood": {
     "title": "添加食材",
@@ -181,7 +186,8 @@
     "recommendingShelfLifeText": "正在推荐保质期...",
     "recommendedShelfLifeLabel": "推荐保质期",
     "expiryDateLabel": "到期日期",
-    "daysUnit": "天"
+    "daysUnit": "天",
+    "willAdd": "将添加"
   },
   "reminders": {
     "title": "提醒中心",
