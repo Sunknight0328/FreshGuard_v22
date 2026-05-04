@@ -1,9 +1,9 @@
 import { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import i18n from '@/i18n';
 import { useNavigate } from 'react-router-dom';
 import { addFoodItem, uploadFoodImage, checkDuplicateFoodItem, increaseFoodQuantity } from '@/db/api';
 import api from '@/utils/api';
+import { sendChatStream } from '@/utils/aiChat';
 import { calculateExpiryDate, getDefaultShelfLife } from '@/utils/shelfLifeHelper';
 import { recommendStorageMethod, getStorageMethodIcon } from '@/utils/storageMethodHelper';
 import { classifyFood } from '@/utils/categoryHelper';
@@ -115,176 +115,130 @@ export default function AddFood() {
     setScannedItems([]);
 
     try {
-      // 将图片转换为base64
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = (reader.result as string).split(',')[1];
+      toast({
+        title: t('common.recognizing'),
+        description: t('common.recognizingDesc'),
+      });
 
-        try {
-          // 提交识别请求
-          toast({
-            title: t('common.recognizing'),
-            description: t('common.recognizingDesc'),
-          });
+      // 步骤1：图片转 base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result;
+          if (typeof result !== 'string') { reject(new Error(t('common.recognitionFailed'))); return; }
+          resolve(result.split(',')[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(imageFile);
+      });
 
-          // 使用简短的提示词（API对文本长度有限制）
-          const isEnglish = i18n.language === 'en';
-          const prompt = isEnglish
-            ? 'List only food names from receipt, one per line. Separate combined items.'
-            : '列出小票中的食品名称，每行一个。分离组合项目。';
-          
-          const submitResponse = await api.submitImageUnderstanding(
-            base64,
-            prompt
-          );
+      // 步骤2：OCR 精准识别小票所有文字（使用 ENG 支持英/欧语言小票）
+      const ocrResponse = await api.recognizeTextAccurate(base64, 'ENG') as any;
+      // 兼容多种返回格式：{ words_result } 或 { data: { words_result } }
+      const rawWords = ocrResponse?.words_result ?? ocrResponse?.data?.words_result ?? [];
+      const wordsResult: Array<{ words: string }> = Array.isArray(rawWords) ? rawWords : [];
 
-          if (submitResponse.status !== 0) {
-            throw new Error(submitResponse.msg || t('common.recognitionFailed'));
-          }
+      let receiptText = '';
 
-          const taskId = submitResponse.data.result.task_id;
-
-          // 轮询获取结果
-          let retryCount = 0;
-          const maxRetries = 10;
-
-          const pollResult = async (): Promise<void> => {
-            if (retryCount >= maxRetries) {
-              throw new Error(t('common.recognitionTimeout'));
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            const resultResponse = await api.getImageUnderstandingResult(taskId);
-
-            if (resultResponse.status !== 0) {
-              throw new Error(resultResponse.msg || t('common.getResultFailed'));
-            }
-
-            const result = resultResponse.data.result;
-
-            if (result.ret_code === 1) {
-              // 仍在处理中
-              retryCount++;
-              return pollResult();
-            } else if (result.ret_code === 0) {
-              // 处理成功
-              const description = result.description || '';
-              
-              // 解析所有商品名称（每行一个）
-              const lines = description.split('\n').filter(line => line.trim());
-              
-              // 过滤掉非商品信息
-              const filteredLines = lines.filter(line => {
-                const cleanLine = line.replace(/^[\d\.\-、]+/, '').trim().toLowerCase();
-                
-                // 过滤掉包含这些关键词的行（非商品信息）
-                const excludeKeywords = [
-                  // 财务相关
-                  'total', 'subtotal', 'tax', 'savings', 'discount', 'payment', 'change',
-                  'price', 'amount', 'balance', 'cash', 'card', 'credit', 'debit',
-                  // 商店信息
-                  'thank you', 'receipt', 'store', 'date', 'time', 'cashier',
-                  'welcome', 'visit', 'customer', 'service', 'phone', 'address',
-                  // 品牌/促销
-                  'save', 'multi-save', 'deal', 'offer', 'promo', 'coupon',
-                  'brand', 'member', 'points', 'rewards',
-                  // 中文关键词
-                  '总计', '小计', '税', '优惠', '折扣', '支付', '找零', '谢谢', '收据', '商店', '日期', '时间', '收银员',
-                  '此条可能', '按原文', '非商品', '总计项', '品牌', '促销', '会员'
-                ];
-                
-                // 如果包含任何排除关键词，则过滤掉
-                const shouldExclude = excludeKeywords.some(keyword => 
-                  cleanLine.includes(keyword.toLowerCase())
-                );
-                
-                // 过滤掉过短的行（少于2个字符）
-                if (cleanLine.length < 2) {
-                  return false;
-                }
-                
-                // 过滤掉纯数字的行
-                if (/^\d+$/.test(cleanLine)) {
-                  return false;
-                }
-                
-                return !shouldExclude;
-              });
-              
-              if (filteredLines.length > 0) {
-                toast({
-                  title: t('addFood.recognizeSuccess'),
-                  description: t('addFood.recognizedItems', { count: filteredLines.length }),
-                });
-
-                // 为每个商品创建初始数据
-                // 流程：1. 识别食材名称 → 2. 智能分类 → 3. 推荐存储方式 → 4. 推荐保质期
-                const items = filteredLines.map(line => {
-                  const name = line.replace(/^[\d\.\-、]+/, '').trim();
-                  
-                  // 步骤1: 智能分类
-                  const category = classifyFood(name);
-                  
-                  // 步骤2: 根据分类推荐存储方式
-                  const storageMethod = recommendStorageMethod(category);
-                  
-                  // 步骤3: 根据分类和存储方式推荐保质期
-                  const shelfLifeDays = getDefaultShelfLife(category, storageMethod);
-                  
-                  // 步骤4: 计算到期日期
-                  const expiryDate = calculateExpiryDate(formData.purchase_date, shelfLifeDays);
-                  
-                  return {
-                    name,
-                    category,
-                    storageMethod,
-                    shelfLifeDays,
-                    expiryDate,
-                    loading: false, // 不再需要异步加载
-                  };
-                });
-
-                setScannedItems(items);
-                
-                toast({
-                  title: t('addFood.smartRecommendComplete'),
-                  description: t('addFood.smartRecommendCompleteDesc'),
-                });
-              } else {
-                toast({
-                  variant: 'destructive',
-                  title: t('addFood.noItemsRecognized'),
-                  description: t('addFood.noItemsRecognizedDesc'),
-                });
-              }
-            } else {
-              throw new Error(t('addFood.recognizeFailed'));
-            }
-          };
-
-          await pollResult();
-        } catch (error: any) {
-          console.error('识别失败:', error);
-          toast({
-            variant: 'destructive',
-            title: t('addFood.recognizeFailed'),
-            description: error.message,
-          });
-        } finally {
-          setRecognizing(false);
-          setScanningReceipt(false);
+      if (wordsResult.length > 0) {
+        receiptText = wordsResult.map(item => item.words).join('\n');
+      } else {
+        // OCR 无结果时，回退到图像理解 API
+        const submitResponse = await api.submitImageUnderstanding(base64, 'List all text lines from this receipt image exactly as they appear, one per line.');
+        if (submitResponse.status !== 0) {
+          throw new Error(submitResponse.msg || t('common.recognitionFailed'));
         }
-      };
+        const taskId = submitResponse.data.result.task_id;
+        let retries = 0;
+        const MAX_RETRIES = 10;
+        const pollForText = async (): Promise<string> => {
+          if (retries >= MAX_RETRIES) throw new Error(t('common.recognitionTimeout'));
+          await new Promise(r => setTimeout(r, 2000));
+          const res = await api.getImageUnderstandingResult(taskId);
+          if (res.status !== 0) throw new Error(res.msg || t('common.getResultFailed'));
+          const result = res.data.result;
+          if (result.ret_code === 1) { retries++; return pollForText(); }
+          if (result.ret_code === 0) return result.description || '';
+          throw new Error(t('addFood.recognizeFailed'));
+        };
+        receiptText = await pollForText();
+      }
 
-      reader.readAsDataURL(imageFile);
+      if (!receiptText.trim()) {
+        throw new Error(t('common.recognitionFailed'));
+      }
+
+      // 步骤3：AI 从 OCR 文字中提取食品名称
+      const APP_ID = import.meta.env.VITE_APP_ID;
+      const CHAT_API_URL = 'https://api-integrations.appmiaoda.com/app-7noqonmn18g1/api-2bk93oeO9NlE/v2/chat/completions';
+
+      const foodNames = await new Promise<string[]>((resolve) => {
+        let fullContent = '';
+
+        sendChatStream({
+          endpoint: CHAT_API_URL,
+          apiId: APP_ID,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a grocery receipt parser. Extract ONLY food and grocery product names from receipt text. Output one product name per line. Do NOT include prices, quantities, weights, store names, totals, taxes, dates, or non-food items. Do NOT add explanations, bullets, or numbering. Keep names exactly as on the receipt.',
+            },
+            {
+              role: 'user',
+              content: `Extract all food and grocery product names from the following receipt, one per line:\n\n${receiptText}`,
+            },
+          ],
+          onUpdate: (content) => {
+            fullContent = content;
+          },
+          onComplete: () => {
+            const lines = fullContent
+              .split('\n')
+              .map(line => line.replace(/^[\-\*\•\d\.]+\s*/, '').trim())
+              .filter(line => line.length >= 2 && !/^\d+(\.\d+)?$/.test(line));
+            resolve(lines);
+          },
+          onError: () => resolve([]),
+        });
+      });
+
+      if (foodNames.length === 0) {
+        toast({
+          variant: 'destructive',
+          title: t('addFood.noItemsRecognized'),
+          description: t('addFood.noItemsRecognizedDesc'),
+        });
+        return;
+      }
+
+      toast({
+        title: t('addFood.recognizeSuccess'),
+        description: t('addFood.recognizedItems', { count: foodNames.length }),
+      });
+
+      // 步骤4：为每个食品创建初始数据（分类→存储方式→保质期→到期日）
+      const items = foodNames.map(name => {
+        const category = classifyFood(name);
+        const storageMethod = recommendStorageMethod(category);
+        const shelfLifeDays = getDefaultShelfLife(category, storageMethod);
+        const expiryDate = calculateExpiryDate(formData.purchase_date, shelfLifeDays);
+        return { name, category, storageMethod, shelfLifeDays, expiryDate, loading: false };
+      });
+
+      setScannedItems(items);
+
+      toast({
+        title: t('addFood.smartRecommendComplete'),
+        description: t('addFood.smartRecommendCompleteDesc'),
+      });
     } catch (error: any) {
-      console.error('识别失败:', error);
+      console.error('Recognition failed:', error);
       toast({
         variant: 'destructive',
         title: t('addFood.recognizeFailed'),
         description: error.message,
       });
+    } finally {
       setRecognizing(false);
       setScanningReceipt(false);
     }
