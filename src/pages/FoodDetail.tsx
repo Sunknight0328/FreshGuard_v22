@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getFoodItemById, updateFoodItem, uploadFoodImage, deleteFoodImage } from '@/db/api';
 import { getStorageMethodIcon } from '@/utils/storageMethodHelper';
+import { compressImage } from '@/utils/imageUtils';
 import type { FoodItem, FoodItemFormData, StorageMethod } from '@/types/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -68,22 +69,16 @@ export default function FoodDetail() {
     }
   };
 
-  const handleImageSelect = (file: File) => {
-    if (file.size > 1024 * 1024) {
-      toast({
-        variant: 'destructive',
-        title: '图片过大',
-        description: '图片大小不能超过1MB',
-      });
-      return;
-    }
+  const handleImageSelect = async (file: File) => {
+    // 自动压缩：移动端相机照片通常 2-8MB，压缩到 900KB 以内
+    const compressed = await compressImage(file);
 
-    setImageFile(file);
+    setImageFile(compressed);
     const reader = new FileReader();
     reader.onloadend = () => {
       setImagePreview(reader.result as string);
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(compressed);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

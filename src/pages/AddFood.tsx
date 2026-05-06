@@ -7,6 +7,7 @@ import { sendChatStream } from '@/utils/aiChat';
 import { calculateExpiryDate, getDefaultShelfLife } from '@/utils/shelfLifeHelper';
 import { recommendStorageMethod, getStorageMethodIcon } from '@/utils/storageMethodHelper';
 import { classifyFood } from '@/utils/categoryHelper';
+import { compressImage } from '@/utils/imageUtils';
 import type { FoodItemFormData, StorageMethod, FoodItem } from '@/types/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -76,22 +77,16 @@ export default function AddFood() {
   const units = ['piece', 'kg', 'g', 'l', 'ml', 'bag', 'box', 'bottle', 'can'];
   const storageMethods: StorageMethod[] = ['refrigerated', 'frozen', 'room_temp'];
 
-  const handleImageSelect = (file: File) => {
-    if (file.size > 1024 * 1024) {
-      toast({
-        variant: 'destructive',
-        title: t('common.imageTooLarge'),
-        description: t('common.imageSizeLimit'),
-      });
-      return;
-    }
+  const handleImageSelect = async (file: File) => {
+    // 自动压缩：移动端相机照片通常 2-8MB，压缩到 900KB 以内再处理
+    const compressed = await compressImage(file);
 
-    setImageFile(file);
+    setImageFile(compressed);
     const reader = new FileReader();
     reader.onloadend = () => {
       setImagePreview(reader.result as string);
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(compressed);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

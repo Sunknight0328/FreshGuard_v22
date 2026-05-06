@@ -3,7 +3,13 @@ import type { ImageUnderstandingResponse } from '@/types/types';
 
 const APP_ID = import.meta.env.VITE_APP_ID;
 
+// Capacitor 打包时，设置 VITE_API_BASE_URL 为已部署的 Web 应用域名
+// 例：VITE_API_BASE_URL=https://your-deployed-app.com
+// Web 开发时留空，由 Vite miaodaDevPlugin 代理处理
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 const apiClient = axios.create({
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",

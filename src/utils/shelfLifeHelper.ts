@@ -3,6 +3,8 @@ import { createParser } from 'eventsource-parser';
 import type { StorageMethod } from '@/types/types';
 
 const APP_ID = import.meta.env.VITE_APP_ID;
+// Capacitor 打包时设置 VITE_API_BASE_URL 为已部署的 Web 应用域名
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
  * 检测文本是否主要包含中文
@@ -60,7 +62,7 @@ export async function searchShelfLife(foodName: string): Promise<number | null> 
       ? '你是一个食材保质期专家，请简洁准确地回答食材的保质期天数。'
       : 'You are a food shelf life expert. Please provide concise and accurate answers about food shelf life in days.';
 
-    ky.post('/api/miaoda/runtime/apicenter/source/proxy/aisearchstreamw4DTfSmsE1', {
+    ky.post(`${API_BASE_URL}/api/miaoda/runtime/apicenter/source/proxy/aisearchstreamw4DTfSmsE1`, {
       json: {
         messages: [
           {
