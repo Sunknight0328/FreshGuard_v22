@@ -354,5 +354,3 @@ const scanCameraInputRef = useRef<HTMLInputElement>(null);
 ---
 
 **时鲜管家** - 让食材管理更智能，让生活更环保 🌱
-
-*持续改进，不断优化！* ✨

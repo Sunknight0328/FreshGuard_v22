@@ -180,7 +180,7 @@ Cookie, Chip, Chocolate, Candy, Cake, Ice Cream, Popcorn
 3. 预期分类结果
 4. 截图（如有）
 
-我们会持续优化和改进！
+如有问题可继续反馈。
 
 ---
 
